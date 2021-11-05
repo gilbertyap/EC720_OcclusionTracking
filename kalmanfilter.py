@@ -1,4 +1,4 @@
-# Kalman Filter written by Zaur Fataliyev, September 5, 2018
+# Original Kalman Filter written by Zaur Fataliyev, September 5, 2018
 # https://github.com/zziz/kalman-filter/
 
 import numpy as np

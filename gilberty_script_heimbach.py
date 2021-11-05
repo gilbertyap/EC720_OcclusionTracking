@@ -125,15 +125,14 @@ def main():
                         class_colors['prediction'], 2)
 
             cv2.imshow('image',image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+            cv2.waitKey(50)
+            # cv2.destroyAllWindows()
 
-            # If the person isn't found, the prediction is fed as a measurement
+            # If the person isn't found, move the bounding box based on predicted velocity
             # TODO - This doesn't seem to be working as expected?
             if not person_found:
-                # new_center = prediction+(prediction-prev_center)
-                # kf.update(new_center)
-                kf.update(prediction)
+                new_center = prediction+(prediction-prev_center)
+                kf.update(new_center)
 
 
 if __name__ == "__main__":
