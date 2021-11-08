@@ -7,7 +7,6 @@
 
 import os
 import random
-import csv
 import numpy as np
 import cv2
 
@@ -18,7 +17,7 @@ from kalmanfilter import KalmanFilter
 def main():
     # Set up the Kalman filter object
     frame_rate = 1/30
-    
+
     # Object dynamics
     # Using parameters from Iraei et al.
     # Their method predicts postion and velocity and assumes that acceleration is constant (I think)
@@ -35,7 +34,7 @@ def main():
     # Lowering the covariance value (<1) makes the prediction closer to the true bbox
     # Increasing the covariance makes the prediction more stable but sometimes slower to catch up
     # Tweaked the value from 15 to 0.5 since it seemed track the YOLO box better
-    noise_cov = 0.5
+    noise_cov = 0.75
     R = np.multiply(noise_cov, np.eye(2))
 
     kf = KalmanFilter(F = F, H = H, Q = Q, R = R)
@@ -44,7 +43,7 @@ def main():
     random.seed(3)
 
     # TODO - Remove this hard coding
-    files = darknet_images.load_images('c1_seq1.txt')
+    files = darknet_images.load_images('david3.txt')
 
     # Increasing the confidence threshold makes the person shape more reliable?
     conf_thresh=0.6
@@ -68,10 +67,16 @@ def main():
     bbox_top= 0
     bbox_bottom = 0
     first_detection_found = False
+
+    # For files with ground truth, get the ground truth bounding box
+    gt_file = open('david3_gt.txt', 'r')
+    org_image_size = (cv2.imread(files[0]).shape)
+
     for file in files:
         # Only search for 'person' label
         image, detections = darknet_images.image_detection(file, network, ['person'],
                                                             class_colors,thresh=conf_thresh)
+
         if not first_detection_found:
             img_size = image.shape
             for label, confidence, bbox in detections:
@@ -119,9 +124,25 @@ def main():
                         (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         class_colors['prediction'], 2)
 
-            cv2.imshow('image',image)
-            cv2.waitKey(50)
+        # Resize the image to the original image size
+        image = cv2.resize(image, (org_image_size[1], org_image_size[0]))
 
+        # For files with ground truth, show the ground truth bounding
+        coordinates = gt_file.readline().split(',')
+        gt_bbox_left = int(coordinates[0])
+        gt_bbox_top = int(coordinates[1])
+        gt_bbox_right = gt_bbox_left+int(coordinates[2])
+        gt_bbox_bottom = gt_bbox_top+int(coordinates[3][0:len(coordinates[3])-1]) # this has a new line character at the end
+        cv2.rectangle(image, (gt_bbox_left, gt_bbox_top), (gt_bbox_right, gt_bbox_bottom), (0,255,0), 1)
+        cv2.putText(image, 'ground-truth',
+                    (gt_bbox_left, gt_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0,255,0), 2)
+
+        cv2.imshow('image',image)
+        cv2.waitKey(50)
+
+
+    gt_file.close()
 
 if __name__ == "__main__":
     main()
