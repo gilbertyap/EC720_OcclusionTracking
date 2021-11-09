@@ -3,7 +3,7 @@
 # Final Project
 # Boston University, Fall 2021
 
-# Assumes that this file will be placed into the dark_net folder
+# Assumes that this file will be placed into the darknet folder
 
 import os
 import random
@@ -13,6 +13,32 @@ import cv2
 import darknet
 import darknet_images
 from kalmanfilter import KalmanFilter
+
+# TODO:
+# Clean up code with ground truth bounding boxes
+# Set up commandline arguement parser to make it easier to run on a specific dataset
+# Get Deep SORT running
+# Multi-object tracking based on appearance and/or location/velocity
+
+# Since the ground-truth box does not change shape,
+# calculating the square error of the distance between centers may be a better metric
+def calculate_bbox_center_dist(gt_center, pred_center):
+    return np.sqrt((gt_center[0]-pred_center[0])**2 + (gt_center[1]-pred_center[1])**2)
+
+# Assumes the following tuple format
+# gt_bbox = (gt_left, gt_top, gt_right, gt_bottom)
+# pred_bbox = (bbox_left, bbox_top, bbox_right, bbox_bottom)
+def calculate_iou(gt_bbox, pred_bbox):
+    # Determine if the ground truth is contained in the prediction or vice versa
+    hor_diff = min(gt_bbox[2], pred_bbox[2]) - max(gt_bbox[0], pred_bbox[0]) + 1
+    ver_diff = min(gt_bbox[3], pred_bbox[3]) - max(gt_bbox[1], pred_bbox[1]) + 1
+    intersection = max(0, hor_diff) * max(0, ver_diff)
+
+    # Sum of the areas minus the intersection, since it gets counted twice
+    union = ((gt_bbox[2]-gt_bbox[0] + 1) * (gt_bbox[3]-gt_bbox[1] + 1)) + ((pred_bbox[2]-pred_bbox[0] + 1) * (pred_bbox[3]-pred_bbox[1] + 1)) - intersection
+
+    return float(intersection/union)
+
 
 def main():
     # Set up the Kalman filter object
@@ -71,11 +97,21 @@ def main():
     # For files with ground truth, get the ground truth bounding box
     gt_file = open('david3_gt.txt', 'r')
     org_image_size = (cv2.imread(files[0]).shape)
+    frame_counter = 0
 
     for file in files:
         # Only search for 'person' label
         image, detections = darknet_images.image_detection(file, network, ['person'],
                                                             class_colors,thresh=conf_thresh)
+
+        # For files with ground truth, show the ground truth bounding
+        coordinates = gt_file.readline().split(',')
+        gt_bbox_left = int(coordinates[0])
+        gt_bbox_top = int(coordinates[1])
+        gt_bbox_right = gt_bbox_left+int(coordinates[2])
+        gt_bbox_bottom = gt_bbox_top+int(coordinates[3][0:len(coordinates[3])-1]) # this has a new line character at the end
+        gt_bbox = (gt_bbox_left, gt_bbox_top, gt_bbox_right, gt_bbox_bottom)
+        gt_center = np.round(np.array([gt_bbox_top+(gt_bbox_bottom-gt_bbox_top)/2, gt_bbox_left+(gt_bbox_right-gt_bbox_left)/2]))
 
         if not first_detection_found:
             img_size = image.shape
@@ -97,9 +133,7 @@ def main():
             # Draw both the true bounding box and the predicted bounding box
             prediction = np.round(np.dot(H,  kf.predict())[0])
 
-            person_found = False
             for label, confidence, bbox in detections:
-                person_found = True
                 bbox_left, bbox_top, bbox_right, bbox_bottom = darknet.bbox2points(bbox)
                 new_center = np.round(np.array([bbox_top+(bbox_bottom-bbox_top)/2, bbox_left+(bbox_right-bbox_left)/2]))
 
@@ -115,31 +149,34 @@ def main():
 
             # Make the predicted bounding box
             pred_bbox_left = int(np.amax([0, prediction[1]-bbox_half_width]))
-            pred_bbox_right= int(np.amin([img_size[1]-1, prediction[1]+bbox_half_width]))
-            pred_bbox_top= int(np.amax([0, prediction[0]-bbox_half_height]))
+            pred_bbox_right = int(np.amin([img_size[1]-1, prediction[1]+bbox_half_width]))
+            pred_bbox_top = int(np.amax([0, prediction[0]-bbox_half_height]))
             pred_bbox_bottom = int(np.amin([img_size[1]-1, prediction[0]+bbox_half_height]))
+            pred_bbox = (pred_bbox_left, pred_bbox_top, pred_bbox_right, pred_bbox_bottom)
 
+            # TODO - Determine if it's better to use IOU or the Euclidean distance between ground-truth and prediction bounding boxes
             cv2.rectangle(image, (pred_bbox_left, pred_bbox_top), (pred_bbox_right, pred_bbox_bottom), class_colors['prediction'], 1)
-            cv2.putText(image, 'prediction',
+            cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_iou(gt_bbox, pred_bbox)),
                         (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         class_colors['prediction'], 2)
+            # cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_bbox_center_dist(gt_center, prev_center)),
+            #             (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+            #             class_colors['prediction'], 2)
 
         # Resize the image to the original image size
         image = cv2.resize(image, (org_image_size[1], org_image_size[0]))
 
-        # For files with ground truth, show the ground truth bounding
-        coordinates = gt_file.readline().split(',')
-        gt_bbox_left = int(coordinates[0])
-        gt_bbox_top = int(coordinates[1])
-        gt_bbox_right = gt_bbox_left+int(coordinates[2])
-        gt_bbox_bottom = gt_bbox_top+int(coordinates[3][0:len(coordinates[3])-1]) # this has a new line character at the end
+        # For files with ground truth, show the ground truth bounding box
         cv2.rectangle(image, (gt_bbox_left, gt_bbox_top), (gt_bbox_right, gt_bbox_bottom), (0,255,0), 1)
-        cv2.putText(image, 'ground-truth',
+        cv2.putText(image, 'GT',
                     (gt_bbox_left, gt_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (0,255,0), 2)
 
+        # Display the image and write it to the 'gen' folder
         cv2.imshow('image',image)
-        cv2.waitKey(50)
+        cv2.waitKey(33)
+        cv2.imwrite('.//gen//'+'{:05d}'.format(frame_counter)+'.jpg',image)
+        frame_counter+=1
 
 
     gt_file.close()
