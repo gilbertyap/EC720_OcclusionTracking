@@ -53,8 +53,8 @@ def main():
                 # TODO - Not entirely sure that this is correct
                 scaling_factor_x = org_image_size[1]/image_size[1]
                 scaling_factor_y = org_image_size[0]/image_size[0]
-                scaled_bbox_left = scaling_factor_x*bbox_left
-                scaled_bbox_top = scaling_factor_y*bbox_top
+                scaled_bbox_left = np.floor((scaling_factor_x*bbox_left) - (scaling_factor_x - 1))
+                scaled_bbox_top = snp.floor((scaling_factor_y*bbox_top) - (scaling_factor_x - 1))
                 scaled_bbox_right = scaling_factor_x*bbox_right
                 scaled_bbox_bottom = scaling_factor_y*bbox_bottom
 

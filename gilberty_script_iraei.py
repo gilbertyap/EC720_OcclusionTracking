@@ -163,11 +163,10 @@ def main():
             cv2.rectangle(image, (pred_bbox_left, pred_bbox_top), (pred_bbox_right, pred_bbox_bottom), class_colors['prediction'], 1)
 
             # Resize the prediciton box to the original image size
-            # TODO - Is this scaling method correct?
             scaling_factor_x = org_image_size[1]/image_size[1]
             scaling_factor_y = org_image_size[0]/image_size[0]
-            scaled_pred_bbox_left = scaling_factor_x*pred_bbox_left
-            scaled_pred_bbox_top = scaling_factor_y*pred_bbox_top
+            scaled_pred_bbox_left = np.floor((scaling_factor_x*pred_bbox_left) - (scaling_factor_x - 1))
+            scaled_pred_bbox_top = np.floor((scaling_factor_y*pred_bbox_top) - (scaling_factor_y - 1))
             scaled_pred_bbox_right = scaling_factor_x*pred_bbox_right
             scaled_pred_bbox_bottom = scaling_factor_y*pred_bbox_bottom
             scaled_pred_bbox = (scaled_pred_bbox_left, scaled_pred_bbox_top, scaled_pred_bbox_right, scaled_pred_bbox_bottom)
