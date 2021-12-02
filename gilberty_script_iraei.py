@@ -17,8 +17,9 @@ from kalmanfilter import KalmanFilter
 # TODO:
 # Clean up code with ground truth bounding boxes
 # Set up commandline arguement parser to make it easier to run on a specific dataset
-# Get Deep SORT running
+# Streamline the Deep SORT process
 # Multi-object tracking based on appearance and/or location/velocity
+# Add bbox to the Kalman filter to help with z-axis movement
 
 # Since the ground-truth box does not change shape,
 # calculating the square error of the distance between centers may be a better metric
@@ -65,14 +66,14 @@ def main():
 
     kf = KalmanFilter(F = F, H = H, Q = Q, R = R)
 
-    # Randomizes the bounding box color or something?
+    # Randomizes the bounding box color or something
     random.seed(3)
 
     # TODO - Remove this hard coding
     files = darknet_images.load_images('david3.txt')
 
     # Increasing the confidence threshold makes the person shape more reliable?
-    conf_thresh=0.6
+    conf_thresh=0.5
 
     # Using the pre-trained weights and cfg from GitHub. Trained on MS COCO
     network, class_names, class_colors = darknet.load_network(
@@ -97,6 +98,12 @@ def main():
     # For files with ground truth, get the ground truth bounding box
     gt_file = open('david3_gt.txt', 'r')
     org_image_size = (cv2.imread(files[0]).shape)
+
+    # Get the shape of the resized YOLO frame
+    # TODO - Need to have a check incase the input image is smaller than the resize
+    image, detections = darknet_images.image_detection(files[0], network, ['person'],
+                                                        class_colors,thresh=conf_thresh)
+    image_size = image.shape
     frame_counter = 0
 
     for file in files:
@@ -126,6 +133,7 @@ def main():
                 first_detection_found = True
 
                 # Only care about the first detection of person
+                # TODO - For multi-object tracking, a list of bboxes and confidence scores need to be tracked
                 break
 
         else:
@@ -152,13 +160,24 @@ def main():
             pred_bbox_right = int(np.amin([img_size[1]-1, prediction[1]+bbox_half_width]))
             pred_bbox_top = int(np.amax([0, prediction[0]-bbox_half_height]))
             pred_bbox_bottom = int(np.amin([img_size[1]-1, prediction[0]+bbox_half_height]))
-            pred_bbox = (pred_bbox_left, pred_bbox_top, pred_bbox_right, pred_bbox_bottom)
-
-            # TODO - Determine if it's better to use IOU or the Euclidean distance between ground-truth and prediction bounding boxes
             cv2.rectangle(image, (pred_bbox_left, pred_bbox_top), (pred_bbox_right, pred_bbox_bottom), class_colors['prediction'], 1)
-            cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_iou(gt_bbox, pred_bbox)),
+
+            # Resize the prediciton box to the original image size
+            # TODO - Is this scaling method correct?
+            scaling_factor_x = org_image_size[1]/image_size[1]
+            scaling_factor_y = org_image_size[0]/image_size[0]
+            scaled_pred_bbox_left = scaling_factor_x*pred_bbox_left
+            scaled_pred_bbox_top = scaling_factor_y*pred_bbox_top
+            scaled_pred_bbox_right = scaling_factor_x*pred_bbox_right
+            scaled_pred_bbox_bottom = scaling_factor_y*pred_bbox_bottom
+            scaled_pred_bbox = (scaled_pred_bbox_left, scaled_pred_bbox_top, scaled_pred_bbox_right, scaled_pred_bbox_bottom)
+
+            # Use the non-scaled prediction coordinates to draw the box since frame scaling happens later
+            cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_iou(gt_bbox, scaled_pred_bbox)),
                         (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         class_colors['prediction'], 2)
+
+            # TODO - Determine if it's better to use IOU or the Euclidean distance between ground-truth and prediction bounding boxes
             # cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_bbox_center_dist(gt_center, prev_center)),
             #             (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
             #             class_colors['prediction'], 2)
