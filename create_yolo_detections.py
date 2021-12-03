@@ -14,9 +14,6 @@ import darknet
 import darknet_images
 
 def main():
-    # Set up the Kalman filter object
-    frame_rate = 1/30
-
     # Randomizes the bounding box color or something?
     random.seed(3)
 
@@ -34,13 +31,17 @@ def main():
     )
 
     # Get the original image size and the YOLO resized size
-    # TODO - assumed that the YOLO size is smaller than the input
     org_image_size = (cv2.imread(files[0]).shape)
     image, detections = darknet_images.image_detection(files[0], network, ['person'],
                                                         class_colors,thresh=conf_thresh)
     image_size = image.shape
 
+    scaling_factor_x = org_image_size[1]/image_size[1]
+    scaling_factor_y = org_image_size[0]/image_size[0]
+    print('Scaling factors {}, {}'.format(scaling_factor_x,scaling_factor_y))
     frame_counter = 1
+    blank_frame = np.zeros(image_size)
+
     with open('det.txt', 'w') as det_file:
         for file in files:
             # Only search for 'person' label
@@ -49,14 +50,12 @@ def main():
 
             for label, confidence, bbox in detections:
                 bbox_left, bbox_top, bbox_right, bbox_bottom = darknet.bbox2points(bbox)
-
-                # TODO - Not entirely sure that this is correct
-                scaling_factor_x = org_image_size[1]/image_size[1]
-                scaling_factor_y = org_image_size[0]/image_size[0]
                 scaled_bbox_left = np.floor((scaling_factor_x*bbox_left) - (scaling_factor_x - 1))
-                scaled_bbox_top = snp.floor((scaling_factor_y*bbox_top) - (scaling_factor_x - 1))
-                scaled_bbox_right = scaling_factor_x*bbox_right
-                scaled_bbox_bottom = scaling_factor_y*bbox_bottom
+                scaled_bbox_top = np.floor((scaling_factor_y*bbox_top) - (scaling_factor_x - 1))
+                scaled_bbox_right = np.ceil(scaling_factor_x*bbox_right)
+                scaled_bbox_bottom = np.ceil(scaling_factor_y*bbox_bottom)
+                # cv2.rectangle(blank_frame, (int(scaled_bbox_left), int(scaled_bbox_top)), (int(scaled_bbox_right), int(scaled_bbox_bottom)), [0,0, 255], 1)
+                # cv2.imwrite('.//det_gen//'+'{:05d}'.format(frame_counter)+'.jpg',blank_frame)
 
                 print('Writing frame {} detections'.format(frame_counter))
                 det_file.write('{},-1,{},{},{},{},{}\n'.format(frame_counter, scaled_bbox_left, scaled_bbox_top, scaled_bbox_right, scaled_bbox_bottom, confidence))

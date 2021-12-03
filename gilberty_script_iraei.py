@@ -9,6 +9,7 @@ import os
 import random
 import numpy as np
 import cv2
+import argparse
 
 import darknet
 import darknet_images
@@ -20,6 +21,25 @@ from kalmanfilter import KalmanFilter
 # Streamline the Deep SORT process
 # Multi-object tracking based on appearance and/or location/velocity
 # Add bbox to the Kalman filter to help with z-axis movement
+
+# Based on image_detection function from darknet_images.py
+# Just removes the drawing of the bounding box
+def darknet_det(image_path, network, class_names, class_colors, thresh):
+    # Darknet doesn't accept numpy images.
+    # Create one with image we reuse for each detect
+    width = darknet.network_width(network)
+    height = darknet.network_height(network)
+    darknet_image = darknet.make_image(width, height, 3)
+
+    image = cv2.imread(image_path)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_resized = cv2.resize(image_rgb, (width, height),
+                               interpolation=cv2.INTER_LINEAR)
+
+    darknet.copy_image_from_bytes(darknet_image, image_resized.tobytes())
+    detections = darknet.detect_image(network, class_names, darknet_image, thresh=thresh)
+    darknet.free_image(darknet_image)
+    return detections
 
 # Since the ground-truth box does not change shape,
 # calculating the square error of the distance between centers may be a better metric
@@ -41,7 +61,8 @@ def calculate_iou(gt_bbox, pred_bbox):
     return float(intersection/union)
 
 
-def main():
+# def main():
+def main(img_dir, min_conf, gt_path, output_dir):
     # Set up the Kalman filter object
     frame_rate = 1/30
 
@@ -69,11 +90,14 @@ def main():
     # Randomizes the bounding box color or something
     random.seed(3)
 
-    # TODO - Remove this hard coding
-    files = darknet_images.load_images('david3.txt')
+    # TODO - Handle relative pathing
+    filenames = os.listdir(img_dir)
+    filenames.sort()
+    with open('files.txt', 'w') as f:
+        for name in filenames:
+            f.write(img_dir+name+'\n')
 
-    # Increasing the confidence threshold makes the person shape more reliable?
-    conf_thresh=0.5
+    files = darknet_images.load_images('files.txt')
 
     # Using the pre-trained weights and cfg from GitHub. Trained on MS COCO
     network, class_names, class_colors = darknet.load_network(
@@ -83,7 +107,7 @@ def main():
     )
 
     # Add a prediction window to the classes, yellow bounding box
-    class_colors['prediction']= (255,255,0)
+    class_colors['prediction']= (0,0,255)
 
     # TODO - This assumes that there is only one person in the image
     # Go through every image and get the bounding box coordinates of the person
@@ -96,32 +120,37 @@ def main():
     first_detection_found = False
 
     # For files with ground truth, get the ground truth bounding box
-    gt_file = open('david3_gt.txt', 'r')
+    if gt_path != '':
+        gt_file = open(gt_path, 'r')
+
     org_image_size = (cv2.imread(files[0]).shape)
 
     # Get the shape of the resized YOLO frame
     # TODO - Need to have a check incase the input image is smaller than the resize
     image, detections = darknet_images.image_detection(files[0], network, ['person'],
-                                                        class_colors,thresh=conf_thresh)
-    image_size = image.shape
-    frame_counter = 0
+                                                        class_colors,thresh=min_conf)
+    img_size = image.shape
+    scaling_factor_x = org_image_size[1]/img_size[1]
+    scaling_factor_y = org_image_size[0]/img_size[0]
 
+    frame_counter = 0
     for file in files:
         # Only search for 'person' label
-        image, detections = darknet_images.image_detection(file, network, ['person'],
-                                                            class_colors,thresh=conf_thresh)
+        detections = darknet_det(file, network, ['person'], class_colors,thresh=min_conf)
+        # image, detections = darknet_images.image_detection(file, network, ['person'],
+        #                                                     class_colors,thresh=min_conf)
 
-        # For files with ground truth, show the ground truth bounding
-        coordinates = gt_file.readline().split(',')
-        gt_bbox_left = int(coordinates[0])
-        gt_bbox_top = int(coordinates[1])
-        gt_bbox_right = gt_bbox_left+int(coordinates[2])
-        gt_bbox_bottom = gt_bbox_top+int(coordinates[3][0:len(coordinates[3])-1]) # this has a new line character at the end
-        gt_bbox = (gt_bbox_left, gt_bbox_top, gt_bbox_right, gt_bbox_bottom)
-        gt_center = np.round(np.array([gt_bbox_top+(gt_bbox_bottom-gt_bbox_top)/2, gt_bbox_left+(gt_bbox_right-gt_bbox_left)/2]))
+        if gt_path != '':
+            # For files with ground truth, show the ground truth bounding
+            coordinates = gt_file.readline().split(',')
+            gt_bbox_left = int(coordinates[0])
+            gt_bbox_top = int(coordinates[1])
+            gt_bbox_right = gt_bbox_left+int(coordinates[2])
+            gt_bbox_bottom = gt_bbox_top+int(coordinates[3][0:len(coordinates[3])-1]) # this has a new line character at the end
+            gt_bbox = (gt_bbox_left, gt_bbox_top, gt_bbox_right, gt_bbox_bottom)
+            gt_center = np.round(np.array([gt_bbox_top+(gt_bbox_bottom-gt_bbox_top)/2, gt_bbox_left+(gt_bbox_right-gt_bbox_left)/2]))
 
         if not first_detection_found:
-            img_size = image.shape
             for label, confidence, bbox in detections:
                 bbox_left, bbox_top, bbox_right, bbox_bottom = darknet.bbox2points(bbox)
                 new_center = np.round(np.array([bbox_top+(bbox_bottom-bbox_top)/2, bbox_left+(bbox_right-bbox_left)/2]))
@@ -151,6 +180,9 @@ def main():
                 # Only care about the first detection of person
                 break
 
+            # TODO - Hardcoded to the default YOLOv4 size
+            image = cv2.resize(cv2.imread(file), (608, 608), interpolation=cv2.INTER_LINEAR)
+
             # Predicted bounding box
             bbox_half_width = bbox_right - prev_center[1]
             bbox_half_height =  bbox_bottom - prev_center[0]
@@ -163,16 +195,19 @@ def main():
             cv2.rectangle(image, (pred_bbox_left, pred_bbox_top), (pred_bbox_right, pred_bbox_bottom), class_colors['prediction'], 1)
 
             # Resize the prediciton box to the original image size
-            scaling_factor_x = org_image_size[1]/image_size[1]
-            scaling_factor_y = org_image_size[0]/image_size[0]
             scaled_pred_bbox_left = np.floor((scaling_factor_x*pred_bbox_left) - (scaling_factor_x - 1))
             scaled_pred_bbox_top = np.floor((scaling_factor_y*pred_bbox_top) - (scaling_factor_y - 1))
-            scaled_pred_bbox_right = scaling_factor_x*pred_bbox_right
-            scaled_pred_bbox_bottom = scaling_factor_y*pred_bbox_bottom
+            scaled_pred_bbox_right = np.ceil(scaling_factor_x*pred_bbox_right)
+            scaled_pred_bbox_bottom = np.ceil(scaling_factor_y*pred_bbox_bottom)
             scaled_pred_bbox = (scaled_pred_bbox_left, scaled_pred_bbox_top, scaled_pred_bbox_right, scaled_pred_bbox_bottom)
 
             # Use the non-scaled prediction coordinates to draw the box since frame scaling happens later
-            cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_iou(gt_bbox, scaled_pred_bbox)),
+            if gt_path != '':
+                cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_iou(gt_bbox, scaled_pred_bbox)),
+                        (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                        class_colors['prediction'], 2)
+            else:
+                cv2.putText(image, 'Pred',
                         (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         class_colors['prediction'], 2)
 
@@ -185,19 +220,36 @@ def main():
         image = cv2.resize(image, (org_image_size[1], org_image_size[0]))
 
         # For files with ground truth, show the ground truth bounding box
-        cv2.rectangle(image, (gt_bbox_left, gt_bbox_top), (gt_bbox_right, gt_bbox_bottom), (0,255,0), 1)
-        cv2.putText(image, 'GT',
-                    (gt_bbox_left, gt_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    (0,255,0), 2)
+        if gt_path != '':
+            cv2.rectangle(image, (gt_bbox_left, gt_bbox_top), (gt_bbox_right, gt_bbox_bottom), (0,255,0), 1)
+            cv2.putText(image, 'GT',
+                        (gt_bbox_left, gt_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                        (0,255,0), 2)
 
-        # Display the image and write it to the 'gen' folder
+        # TODO - Make display optional
         cv2.imshow('image',image)
         cv2.waitKey(33)
-        cv2.imwrite('.//gen//'+'{:05d}'.format(frame_counter)+'.jpg',image)
-        frame_counter+=1
 
+        cv2.imwrite(output_dir+'{:05d}'.format(frame_counter)+'.jpg',image)
+        frame_counter+=1
 
     gt_file.close()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Deep SORT")
+    parser.add_argument(
+        "--img_dir", help="Path to images directory",
+        default=None, required=True)
+    parser.add_argument(
+        "--min_conf", help="Minimum confidence score", default=0.5, type=float)
+    parser.add_argument(
+        "--gt_path", help="Ground truth file path", default='')
+    parser.add_argument(
+        "--output_dir", help="Path to output directory",
+        default="./gen/")
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args.img_dir, args.min_conf, args.gt_path, args.output_dir)
+    # main()
