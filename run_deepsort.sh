@@ -3,7 +3,7 @@ cp create_yolo_detections.py ../darknet/create_yolo_detections.py
 cd ../darknet
 python3 create_yolo_detections.py --img_dir '/home/gilbert/Downloads/David3/img/'
 
-# mkdir ../darknet/dets/img/det
+mkdir ../darknet/dets/img/det
 mv det.txt ./dets/img/det
 
 cd ../deep_sort
