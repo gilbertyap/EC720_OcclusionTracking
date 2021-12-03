@@ -16,9 +16,6 @@ import darknet_images
 from kalmanfilter import KalmanFilter
 
 # TODO:
-# Clean up code with ground truth bounding boxes
-# Set up commandline arguement parser to make it easier to run on a specific dataset
-# Streamline the Deep SORT process
 # Multi-object tracking based on appearance and/or location/velocity
 # Add bbox to the Kalman filter to help with z-axis movement
 
@@ -62,17 +59,23 @@ def calculate_iou(gt_bbox, pred_bbox):
 
 
 # def main():
-def main(img_dir, min_conf, gt_path, output_dir):
+def main(img_dir, min_conf, gt_path, sort_path, output_dir):
     # Set up the Kalman filter object
     frame_rate = 1/30
 
     # Object dynamics
     # Using parameters from Iraei et al.
-    # Their method predicts postion and velocity and assumes that acceleration is constant (I think)
-    F = np.array([[1, 0, frame_rate, 0, frame_rate/2, 0], [0, 1, 0, frame_rate, 0 , frame_rate/2], [0, 0, 1, 0, frame_rate, 0], [0, 0, 0, 1, 0, frame_rate], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1]])
+    # Their method predicts postion and velocity and assumes that acceleration is constant but very small
+    F = np.array([[1, 0, frame_rate, 0, frame_rate/2, 0],
+                    [0, 1, 0, frame_rate, 0 , frame_rate/2],
+                    [0, 0, 1, 0, frame_rate, 0],
+                    [0, 0, 0, 1, 0, frame_rate],
+                    [0, 0, 0, 0, 1, 0],
+                    [0, 0, 0, 0, 0, 1]])
 
     # Observation - only retrieving the position
-    H = np.array([[1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0 , 0]])
+    H = np.array([[1, 0, 0, 0, 0, 0],
+                    [0, 1, 0, 0, 0 , 0]])
 
     #  Covariance of the process noise
     # TODO - Iraei does an identity matrix, but Heimbach has 1 and 6 in the matrix?
@@ -90,6 +93,7 @@ def main(img_dir, min_conf, gt_path, output_dir):
     # Randomizes the bounding box color or something
     random.seed(3)
 
+    # Make a text file that lists all of the files
     # TODO - Handle relative pathing
     filenames = os.listdir(img_dir)
     filenames.sort()
@@ -110,7 +114,7 @@ def main(img_dir, min_conf, gt_path, output_dir):
     class_colors['prediction']= (0,0,255)
 
     # TODO - This assumes that there is only one person in the image
-    # Go through every image and get the bounding box coordinates of the person
+    # Go through every image and get the bounding box gt_coordinates of the person
     prev_center = -1*np.ones([1,2])
     new_center = -1*np.ones([1,2])
     bbox_left = 0
@@ -120,8 +124,12 @@ def main(img_dir, min_conf, gt_path, output_dir):
     first_detection_found = False
 
     # For files with ground truth, get the ground truth bounding box
-    if gt_path != '':
+    # TODO - specify a ground truth format in the README
+    if gt_path is not None:
         gt_file = open(gt_path, 'r')
+
+    if sort_path is not None:
+        sort_file = open(sort_path, 'r')
 
     org_image_size = (cv2.imread(files[0]).shape)
 
@@ -133,22 +141,47 @@ def main(img_dir, min_conf, gt_path, output_dir):
     scaling_factor_x = org_image_size[1]/img_size[1]
     scaling_factor_y = org_image_size[0]/img_size[0]
 
-    frame_counter = 0
+    image = np.zeros(img_size)
+
+    frame_counter = 1
+    sort_frame_id = -1
     for file in files:
         # Only search for 'person' label
         detections = darknet_det(file, network, ['person'], class_colors,thresh=min_conf)
         # image, detections = darknet_images.image_detection(file, network, ['person'],
         #                                                     class_colors,thresh=min_conf)
 
-        if gt_path != '':
+        draw_sort = False
+
+        if gt_path is not None:
             # For files with ground truth, show the ground truth bounding
-            coordinates = gt_file.readline().split(',')
-            gt_bbox_left = int(coordinates[0])
-            gt_bbox_top = int(coordinates[1])
-            gt_bbox_right = gt_bbox_left+int(coordinates[2])
-            gt_bbox_bottom = gt_bbox_top+int(coordinates[3][0:len(coordinates[3])-1]) # this has a new line character at the end
+            gt_coordinates = gt_file.readline().split(',')
+            gt_bbox_left = int(gt_coordinates[0])
+            gt_bbox_top = int(gt_coordinates[1])
+            gt_bbox_right = gt_bbox_left+int(gt_coordinates[2])
+            gt_bbox_bottom = gt_bbox_top+int(gt_coordinates[3][0:len(gt_coordinates[3])-1]) # this has a new line character at the end
             gt_bbox = (gt_bbox_left, gt_bbox_top, gt_bbox_right, gt_bbox_bottom)
             gt_center = np.round(np.array([gt_bbox_top+(gt_bbox_bottom-gt_bbox_top)/2, gt_bbox_left+(gt_bbox_right-gt_bbox_left)/2]))
+
+        if sort_path is not None:
+            # If Deep SORT detections are available, display them
+            # Have to make sure that the displayed bounding box matches the current frame counter
+            # If the sort_frame_id is greater than the frame_counter, hold onto the info until the frame_counter matches
+            # else keep reading until sort_frame_id is >= the frame_counter
+            while(sort_frame_id < frame_counter):
+                sort_coordinates = sort_file.readline().split(',')
+                sort_frame_id = int(sort_coordinates[0])
+
+                # sort_obj_id = int(sort_coordinates[1])
+                sort_bbox_left = int(float(sort_coordinates[2]))
+                sort_bbox_top = int(float(sort_coordinates[3]))
+                sort_bbox_right = int(sort_bbox_left+float(sort_coordinates[4]))
+                sort_bbox_bottom = int(sort_bbox_top+float(sort_coordinates[5]))
+                sort_bbox = (sort_bbox_left, sort_bbox_top, sort_bbox_right, sort_bbox_bottom)
+                sort_center = np.round(np.array([sort_bbox_top+(sort_bbox_bottom-sort_bbox_top)/2, sort_bbox_left+(sort_bbox_right-sort_bbox_left)/2]))
+
+            if (sort_frame_id == frame_counter):
+                draw_sort = True
 
         if not first_detection_found:
             for label, confidence, bbox in detections:
@@ -168,6 +201,7 @@ def main(img_dir, min_conf, gt_path, output_dir):
         else:
             # If the person has already been identified once,
             # Draw both the true bounding box and the predicted bounding box
+            # TODO - Only show the prediction if less than a certain number of frames has passed since occlusion
             prediction = np.round(np.dot(H,  kf.predict())[0])
 
             for label, confidence, bbox in detections:
@@ -201,13 +235,13 @@ def main(img_dir, min_conf, gt_path, output_dir):
             scaled_pred_bbox_bottom = np.ceil(scaling_factor_y*pred_bbox_bottom)
             scaled_pred_bbox = (scaled_pred_bbox_left, scaled_pred_bbox_top, scaled_pred_bbox_right, scaled_pred_bbox_bottom)
 
-            # Use the non-scaled prediction coordinates to draw the box since frame scaling happens later
-            if gt_path != '':
-                cv2.putText(image, 'Pred - IoU {:.3f}'.format(calculate_iou(gt_bbox, scaled_pred_bbox)),
+            # Use the non-scaled prediction gt_coordinates to draw the box since frame scaling happens later
+            if gt_path is not None:
+                cv2.putText(image, 'YOLO v4 + KF - IoU {:.3f}'.format(calculate_iou(gt_bbox, scaled_pred_bbox)),
                         (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         class_colors['prediction'], 2)
             else:
-                cv2.putText(image, 'Pred',
+                cv2.putText(image, 'YOLO v4 + KF',
                         (pred_bbox_left, pred_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         class_colors['prediction'], 2)
 
@@ -220,11 +254,23 @@ def main(img_dir, min_conf, gt_path, output_dir):
         image = cv2.resize(image, (org_image_size[1], org_image_size[0]))
 
         # For files with ground truth, show the ground truth bounding box
-        if gt_path != '':
+        if gt_path is not None:
             cv2.rectangle(image, (gt_bbox_left, gt_bbox_top), (gt_bbox_right, gt_bbox_bottom), (0,255,0), 1)
             cv2.putText(image, 'GT',
                         (gt_bbox_left, gt_bbox_top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         (0,255,0), 2)
+
+        # For files with Deep SORT detections, show their bbox
+        if (gt_path is not None) and (sort_path is not None) and (draw_sort):
+            cv2.rectangle(image, (sort_bbox_left, sort_bbox_top), (sort_bbox_right, sort_bbox_bottom), (255,0,0), 1)
+            cv2.putText(image, 'YOLO v4 + DS - IoU {:.3f}'.format(calculate_iou(gt_bbox, sort_bbox)),
+                    (sort_bbox_right, sort_bbox_bottom - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (255,0,0), 2)
+        elif (sort_path is not None) and (draw_sort):
+            cv2.rectangle(image, (sort_bbox_left, sort_bbox_top), (sort_bbox_right, sort_bbox_bottom), (255,0,0), 1)
+            cv2.putText(image, 'YOLO v4 + DS',
+                        (sort_bbox_right, sort_bbox_bottom - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                        (255,0,0), 2)
 
         # TODO - Make display optional
         cv2.imshow('image',image)
@@ -233,7 +279,10 @@ def main(img_dir, min_conf, gt_path, output_dir):
         cv2.imwrite(output_dir+'{:05d}'.format(frame_counter)+'.jpg',image)
         frame_counter+=1
 
+    # TODO - Save a file that contains the IoU and center distance measure for your method and for DeepSORT
+
     gt_file.close()
+    sort_file.close()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Deep SORT")
@@ -243,7 +292,9 @@ def parse_args():
     parser.add_argument(
         "--min_conf", help="Minimum confidence score", default=0.5, type=float)
     parser.add_argument(
-        "--gt_path", help="Ground truth file path", default='')
+        "--gt_path", help="Ground truth file path", default=None)
+    parser.add_argument(
+        "--sort_path", help="Deep SORT detections file path", default=None)
     parser.add_argument(
         "--output_dir", help="Path to output directory",
         default="./gen/")
@@ -251,5 +302,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.img_dir, args.min_conf, args.gt_path, args.output_dir)
+    main(args.img_dir, args.min_conf, args.gt_path, args.sort_path, args.output_dir)
     # main()
