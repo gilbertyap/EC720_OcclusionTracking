@@ -62,14 +62,14 @@ def main(img_dir, min_conf):
 
                 print('Writing frame {} detections'.format(frame_counter))
                 # The -1 is an ID given to the object
-                # TODO - Will need to change label id if doing multi-object
-                det_file.write('{},1,{},{},{},{},{}\n'.format(frame_counter, scaled_bbox_left, scaled_bbox_top, scaled_bbox_right, scaled_bbox_bottom, float(confidence)/100))
+                # TODO - Will need to change label id if doing multi-object?
+                det_file.write('{},-1,{},{},{},{},{}\n'.format(frame_counter, scaled_bbox_left, scaled_bbox_top, scaled_bbox_right, scaled_bbox_bottom, float(confidence)/100))
 
             frame_counter += 1
     print('Finished writing frame detections')
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Deep SORT")
+    parser = argparse.ArgumentParser(description="Ec720 Occlusion Tracking Detection Generator")
     parser.add_argument(
         "--img_dir", help="Path to images directory",
         default=None, required=True)
