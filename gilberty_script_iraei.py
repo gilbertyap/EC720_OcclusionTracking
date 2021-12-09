@@ -417,7 +417,7 @@ def main(img_dir, min_conf, gt_path, sort_path, output_dir, display):
             # Write Deep SORT IoU and bbox center to file
             if (gt_path is not None) :
                 sort_res_file.write('{},{},{}\n'.format(frame_counter,
-                                                    calculate_iou(gt_bbox, scaled_disp_bbox),
+                                                    calculate_iou(gt_bbox, sort_bbox),
                                                     calculate_bbox_center_dist(gt_center, sort_center)))
 
         # Dispaly the bounding boxes and such
